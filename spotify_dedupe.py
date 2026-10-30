@@ -36,6 +36,8 @@ Notes
   - Only playlists you own or collaborate on can be read/changed (Spotify rule).
   - Spotify's Development Mode requires the app owner to have Premium.
   - Local files can't be removed through the API, so they are skipped.
+  - The API can only remove every copy of a track at once. For exact copies the
+    kept one is re-added at its old position, so its "date added" becomes today.
 """
 
 import argparse
@@ -335,9 +337,13 @@ def plan_within(playlist):
     for g in cluster(playlist["tracks"], playlist["_fuzzy"]):
         keep, *drop = sorted(g, key=lambda t: (t["added_at"] or "9999", t["pos"]))
         for t in drop:
+            reason = (f"added {added_on(t)}; keeping #{keep['pos'] + 1} "
+                      f"{fmt(keep)}, added {added_on(keep)}")
+            if t["uri"] == keep["uri"]:
+                # Exact copies can only be removed all at once, so the kept one is re-added.
+                reason += "\n          !! exact copy: the kept track's date added will reset to today"
             removals.append({"pos": t["pos"], "track": t, "kept_pos": keep["pos"],
-                             "reason": f"added {added_on(t)}; keeping #{keep['pos'] + 1} "
-                                       f"{fmt(keep)}, added {added_on(keep)}"})
+                             "reason": reason})
     return removals
 
 
