@@ -26,12 +26,12 @@ Setup (one time)
      - API:           Web API
   2. Copy the app's Client ID, then:
        export SPOTIFY_CLIENT_ID=your_client_id
-  3. pip install requests
-  4. python spotify_dedupe.py                 # scan + confirm, within playlists
-     python spotify_dedupe.py --mode across   # across playlists
-     python spotify_dedupe.py --fuzzy --dry-run
-     python spotify_dedupe.py --liked-only --dry-run
-     python spotify_dedupe.py --list          # playlist names, for --only
+  3. Install uv: https://docs.astral.sh/uv/
+  4. uv run spotify_dedupe.py                 # scan + confirm, within playlists
+     uv run spotify_dedupe.py --mode across   # across playlists
+     uv run spotify_dedupe.py --fuzzy --dry-run
+     uv run spotify_dedupe.py --liked-only --dry-run
+     uv run spotify_dedupe.py --list          # playlist names, for --only
 
 Notes
   - Only playlists you own or collaborate on can be read/changed (Spotify rule).
@@ -61,7 +61,7 @@ from datetime import datetime
 try:
     import requests
 except ImportError:  # pragma: no cover
-    sys.exit("This script needs the 'requests' package:  pip install requests")
+    sys.exit("This script needs the 'requests' package:  uv run spotify_dedupe.py")
 
 API = "https://api.spotify.com/v1"
 AUTH_URL = "https://accounts.spotify.com/authorize"
