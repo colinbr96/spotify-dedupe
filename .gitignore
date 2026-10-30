@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv/
+spotify_backup_*.json
+.spotify_dedupe_token.json
