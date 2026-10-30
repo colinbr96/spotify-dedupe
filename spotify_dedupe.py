@@ -45,6 +45,7 @@ import argparse
 import base64
 import hashlib
 import http.server
+import io
 import json
 import os
 import re
@@ -67,9 +68,11 @@ API = "https://api.spotify.com/v1"
 AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 REDIRECT_URI = os.environ.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
-SCOPES = ("playlist-read-private playlist-read-collaborative "
-          "playlist-modify-public playlist-modify-private "
-          "user-library-read user-library-modify")
+SCOPES = (
+    "playlist-read-private playlist-read-collaborative "
+    "playlist-modify-public playlist-modify-private "
+    "user-library-read user-library-modify"
+)
 LIKED_ID = "__liked_songs__"
 TOKEN_CACHE = os.path.expanduser("~/.spotify_dedupe_token.json")
 FUZZY_DURATION_MS = 3000
@@ -79,6 +82,7 @@ UNAVAILABLE = "(unavailable)"
 # --------------------------------------------------------------------------
 # Authentication (Authorization Code + PKCE: no client secret needed)
 # --------------------------------------------------------------------------
+
 
 class SpotifyAuth:
     def __init__(self, client_id):
@@ -111,11 +115,15 @@ class SpotifyAuth:
         if self.token and time.time() < self.token.get("expires_at", 0):
             return self.token["access_token"]
         if self.token and self.token.get("refresh_token"):
-            r = requests.post(TOKEN_URL, data={
-                "grant_type": "refresh_token",
-                "refresh_token": self.token["refresh_token"],
-                "client_id": self.client_id,
-            }, timeout=30)
+            r = requests.post(
+                TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.token["refresh_token"],
+                    "client_id": self.client_id,
+                },
+                timeout=30,
+            )
             if r.ok:
                 self._save(r.json())
                 return self.token["access_token"]
@@ -124,14 +132,27 @@ class SpotifyAuth:
 
     def _login(self):
         verifier = secrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
         state = secrets.token_urlsafe(16)
-        url = AUTH_URL + "?" + urllib.parse.urlencode({
-            "client_id": self.client_id, "response_type": "code",
-            "redirect_uri": REDIRECT_URI, "scope": SCOPES, "state": state,
-            "code_challenge_method": "S256", "code_challenge": challenge,
-        })
+        url = (
+            AUTH_URL
+            + "?"
+            + urllib.parse.urlencode(
+                {
+                    "client_id": self.client_id,
+                    "response_type": "code",
+                    "redirect_uri": REDIRECT_URI,
+                    "scope": SCOPES,
+                    "state": state,
+                    "code_challenge_method": "S256",
+                    "code_challenge": challenge,
+                }
+            )
+        )
 
         result = {}
         parsed = urllib.parse.urlparse(REDIRECT_URI)
@@ -141,8 +162,11 @@ class SpotifyAuth:
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 if "code" in q or "error" in q:
                     result.update({k: v[0] for k, v in q.items()})
-                    msg = "Logged in. You can close this tab." if "code" in q \
+                    msg = (
+                        "Logged in. You can close this tab."
+                        if "code" in q
                         else "Login failed: " + q["error"][0]
+                    )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/plain")
                     self.end_headers()
@@ -151,10 +175,11 @@ class SpotifyAuth:
                     self.send_response(404)
                     self.end_headers()
 
-            def log_message(self, *a):
+            def log_message(self, format, *args):
                 pass
 
-        server = http.server.HTTPServer((parsed.hostname, parsed.port or 80), Handler)
+        host = parsed.hostname or "127.0.0.1"
+        server = http.server.HTTPServer((host, parsed.port or 80), Handler)
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
         print("\nOpening your browser to log in to Spotify...")
@@ -168,11 +193,17 @@ class SpotifyAuth:
             sys.exit("Spotify login failed: " + result["error"])
         if result.get("state") != state:
             sys.exit("Login state mismatch; aborting.")
-        r = requests.post(TOKEN_URL, data={
-            "grant_type": "authorization_code", "code": result["code"],
-            "redirect_uri": REDIRECT_URI, "client_id": self.client_id,
-            "code_verifier": verifier,
-        }, timeout=30)
+        r = requests.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": result["code"],
+                "redirect_uri": REDIRECT_URI,
+                "client_id": self.client_id,
+                "code_verifier": verifier,
+            },
+            timeout=30,
+        )
         if not r.ok:
             sys.exit("Token exchange failed: " + r.text)
         self._save(r.json())
@@ -181,6 +212,7 @@ class SpotifyAuth:
 # --------------------------------------------------------------------------
 # Minimal API client
 # --------------------------------------------------------------------------
+
 
 class Spotify:
     def __init__(self, auth):
@@ -201,7 +233,7 @@ class Spotify:
                 self.auth.token["expires_at"] = 0  # force refresh
                 continue
             if r.status_code >= 500 and attempt < 5:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
                 continue
             if not r.ok:
                 raise RuntimeError(f"{method} {path} -> {r.status_code}: {r.text[:300]}")
@@ -232,48 +264,54 @@ class Spotify:
     def unlike(self, uris):
         uris = list(uris)
         for i in range(0, len(uris), 40):  # endpoint accepts at most 40 URIs
-            self.request("DELETE", "/me/library", params={"uris": ",".join(uris[i:i + 40])})
+            self.request("DELETE", "/me/library", params={"uris": ",".join(uris[i : i + 40])})
 
     @staticmethod
     def _entries(entries):
         out = []
         for pos, entry in enumerate(entries):
             item = entry.get("item") or entry.get("track")  # 'track' = pre-2026 name
-            out.append({
-                "pos": pos,
-                "uri": (item or {}).get("uri"),
-                "name": (item or {}).get("name") or UNAVAILABLE,
-                "artists": [a.get("name", "") for a in (item or {}).get("artists") or []]
-                           or [((item or {}).get("show") or {}).get("name", "")],
-                "duration_ms": (item or {}).get("duration_ms") or 0,
-                "is_local": bool(entry.get("is_local") or (item or {}).get("is_local")),
-                "added_at": entry.get("added_at") or "",
-            })
+            out.append(
+                {
+                    "pos": pos,
+                    "uri": (item or {}).get("uri"),
+                    "name": (item or {}).get("name") or UNAVAILABLE,
+                    "artists": [a.get("name", "") for a in (item or {}).get("artists") or []]
+                    or [((item or {}).get("show") or {}).get("name", "")],
+                    "duration_ms": (item or {}).get("duration_ms") or 0,
+                    "is_local": bool(entry.get("is_local") or (item or {}).get("is_local")),
+                    "added_at": entry.get("added_at") or "",
+                }
+            )
         return out
 
     def remove_uris(self, pid, uris, snapshot_id=None):
         """Removes ALL occurrences of each URI. Returns the new snapshot id."""
         uris = list(uris)
         for i in range(0, len(uris), 100):
-            body = {"items": [{"uri": u} for u in uris[i:i + 100]]}
+            body = {"items": [{"uri": u} for u in uris[i : i + 100]]}
             if snapshot_id:
                 body["snapshot_id"] = snapshot_id
-            snapshot_id = self.request("DELETE", f"/playlists/{pid}/items",
-                                       json=body).get("snapshot_id", snapshot_id)
+            snapshot_id = self.request("DELETE", f"/playlists/{pid}/items", json=body).get(
+                "snapshot_id", snapshot_id
+            )
         return snapshot_id
 
     def add_uri(self, pid, uri, position):
-        return self.request("POST", f"/playlists/{pid}/items",
-                            json={"uris": [uri], "position": position}).get("snapshot_id")
+        return self.request(
+            "POST", f"/playlists/{pid}/items", json={"uris": [uri], "position": position}
+        ).get("snapshot_id")
 
 
 # --------------------------------------------------------------------------
 # Duplicate detection (pure functions, no network)
 # --------------------------------------------------------------------------
 
-_VERSION_WORDS = r"remaster(ed)?|\d{4} remaster|deluxe|mono|stereo|bonus track|single version|album version"
-_PAREN_RE = re.compile(r"\s*[\(\[][^\)\]]*(" + _VERSION_WORDS + r")[^\)\]]*[\)\]]", re.I)
-_DASH_RE = re.compile(r"\s+-\s+.*(" + _VERSION_WORDS + r").*$", re.I)
+_VERSION_WORDS = (
+    r"remaster(ed)?|\d{4} remaster|deluxe|mono|stereo|bonus track|single version|album version"
+)
+_PAREN_RE = re.compile(r"\s*[\(\[][^\)\]]*(" + _VERSION_WORDS + r")[^\)\]]*[\)\]]", re.IGNORECASE)
+_DASH_RE = re.compile(r"\s+-\s+.*(" + _VERSION_WORDS + r").*$", re.IGNORECASE)
 
 
 def _norm(s):
@@ -314,7 +352,10 @@ def cluster(tracks, fuzzy):
         uris.sort(key=lambda u: by_uri[u][0]["duration_ms"])
         current = [uris[0]]
         for u in uris[1:]:
-            if by_uri[u][0]["duration_ms"] - by_uri[current[-1]][0]["duration_ms"] <= FUZZY_DURATION_MS:
+            if (
+                by_uri[u][0]["duration_ms"] - by_uri[current[-1]][0]["duration_ms"]
+                <= FUZZY_DURATION_MS
+            ):
                 current.append(u)
             else:
                 groups.append(current)
@@ -339,13 +380,18 @@ def plan_within(playlist):
     for g in cluster(playlist["tracks"], playlist["_fuzzy"]):
         keep, *drop = sorted(g, key=lambda t: (t["added_at"] or "9999", t["pos"]))
         for t in drop:
-            reason = (f"added {added_on(t)}; keeping #{keep['pos'] + 1} "
-                      f"{fmt(keep)}, added {added_on(keep)}")
+            reason = (
+                f"added {added_on(t)}; keeping #{keep['pos'] + 1} "
+                f"{fmt(keep)}, added {added_on(keep)}"
+            )
             if t["uri"] == keep["uri"]:
                 # Exact copies can only be removed all at once, so the kept one is re-added.
-                reason += "\n          !! exact copy: the kept track's date added will reset to today"
-            removals.append({"pos": t["pos"], "track": t, "kept_pos": keep["pos"],
-                             "reason": reason})
+                reason += (
+                    "\n          !! exact copy: the kept track's date added will reset to today"
+                )
+            removals.append(
+                {"pos": t["pos"], "track": t, "kept_pos": keep["pos"], "reason": reason}
+            )
     return removals
 
 
@@ -357,9 +403,15 @@ def plan_liked(liked):
         keep = min(g, key=lambda t: (t["added_at"] or "9999", -t["pos"]))
         for t in g:
             if t is not keep:
-                removals.append({"pos": t["pos"], "track": t, "kept_pos": keep["pos"],
-                                 "reason": f"same song as #{keep['pos'] + 1}: "
-                                           f"{fmt(keep)} (liked earlier, kept)"})
+                removals.append(
+                    {
+                        "pos": t["pos"],
+                        "track": t,
+                        "kept_pos": keep["pos"],
+                        "reason": f"same song as #{keep['pos'] + 1}: "
+                        f"{fmt(keep)} (liked earlier, kept)",
+                    }
+                )
     return removals
 
 
@@ -380,9 +432,14 @@ def plan_across(playlists, already_removed, fuzzy):
         keep = min(g, key=lambda t: (t["added_at"] or "9999", playlists.index(t["_pl"]), t["pos"]))
         for t in g:
             if t["_pl"]["id"] != keep["_pl"]["id"]:
-                out[t["_pl"]["id"]].append({
-                    "pos": t["pos"], "track": t, "kept_pos": None,
-                    "reason": f"also in '{keep['_pl']['name']}' (kept there)"})
+                out[t["_pl"]["id"]].append(
+                    {
+                        "pos": t["pos"],
+                        "track": t,
+                        "kept_pos": None,
+                        "reason": f"also in '{keep['_pl']['name']}' (kept there)",
+                    }
+                )
     return out
 
 
@@ -406,15 +463,16 @@ def apply_plan(sp, playlist, removals):
     final = final_order(playlist["tracks"], remove_pos)
     reinserts = [(i, t["uri"]) for i, t in enumerate(final) if t["uri"] in affected]
 
-    snap = sp.remove_uris(playlist["id"], affected, playlist.get("snapshot_id"))
+    sp.remove_uris(playlist["id"], affected, playlist.get("snapshot_id"))
     for idx, uri in reinserts:
-        snap = sp.add_uri(playlist["id"], uri, idx)
+        sp.add_uri(playlist["id"], uri, idx)
     return len(remove_pos), len(reinserts)
 
 
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
+
 
 def fmt(t):
     artists = ", ".join(a for a in t["artists"] if a) or "?"
@@ -440,29 +498,50 @@ def list_playlists(sp, me):
     print(f"{len(rows)} playlists:")
     for p in rows:
         owner = p.get("owner") or {}
-        total = (p.get("items") or p.get("tracks") or {}).get("total", "?")  # 'tracks' = pre-2026 name
-        print(f"  {'mine ' if is_mine(p, me) else 'other'} {total:>5}  {p.get('name') or ''}"
-              f"  [{owner.get('display_name') or owner.get('id') or '?'}]")
+        total = (p.get("items") or p.get("tracks") or {}).get(
+            "total", "?"
+        )  # 'tracks' = pre-2026 name
+        print(
+            f"  {'mine ' if is_mine(p, me) else 'other'} {total:>5}  {p.get('name') or ''}"
+            f"  [{owner.get('display_name') or owner.get('id') or '?'}]"
+        )
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Find and remove duplicate tracks in your Spotify playlists.")
+    ap = argparse.ArgumentParser(
+        description="Find and remove duplicate tracks in your Spotify playlists."
+    )
     ap.add_argument("--mode", choices=["within", "across", "both"], default="within")
-    ap.add_argument("--fuzzy", action="store_true",
-                    help="also match same title + main artist + similar length")
-    ap.add_argument("--liked", action="store_true",
-                    help="also check Liked Songs for the same song liked from different releases")
+    ap.add_argument(
+        "--fuzzy", action="store_true", help="also match same title + main artist + similar length"
+    )
+    ap.add_argument(
+        "--liked",
+        action="store_true",
+        help="also check Liked Songs for the same song liked from different releases",
+    )
     ap.add_argument("--liked-only", action="store_true", help="check only Liked Songs")
-    ap.add_argument("--list", action="store_true", help="list your playlists (exact names for --only) and exit")
+    ap.add_argument(
+        "--list", action="store_true", help="list your playlists (exact names for --only) and exit"
+    )
     ap.add_argument("--dry-run", action="store_true", help="only report, never change anything")
-    ap.add_argument("--yes", action="store_true", help="skip per-playlist prompts (still asks once)")
-    ap.add_argument("--only", nargs="*", default=[], help="only scan playlists with exactly one of these names (case-insensitive)")
-    ap.add_argument("--exclude", nargs="*", default=[], help="skip playlists whose name contains any of these")
+    ap.add_argument(
+        "--yes", action="store_true", help="skip per-playlist prompts (still asks once)"
+    )
+    ap.add_argument(
+        "--only",
+        nargs="*",
+        default=[],
+        help="only scan playlists with exactly one of these names (case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude", nargs="*", default=[], help="skip playlists whose name contains any of these"
+    )
     args = ap.parse_args()
 
     # Track names can hold any character; don't crash on consoles/pipes that use cp1252.
     for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
+        if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(errors="replace")
 
     client_id = os.environ.get("SPOTIFY_CLIENT_ID")
@@ -478,7 +557,7 @@ def main():
         return
 
     playlists = []
-    for p in ([] if args.liked_only else sp.my_playlists()):
+    for p in [] if args.liked_only else sp.my_playlists():
         if not p:
             continue
         name = p.get("name") or ""
@@ -489,8 +568,9 @@ def main():
             continue
         if any(x.lower() in low for x in args.exclude):
             continue
-        playlists.append({"id": p["id"], "name": name, "snapshot_id": p.get("snapshot_id"),
-                          "_fuzzy": args.fuzzy})
+        playlists.append(
+            {"id": p["id"], "name": name, "snapshot_id": p.get("snapshot_id"), "_fuzzy": args.fuzzy}
+        )
 
     print(f"Scanning {len(playlists)} playlists you own or collaborate on...")
     for i, pl in enumerate(playlists, 1):
@@ -510,9 +590,15 @@ def main():
 
     backup = f"spotify_backup_{datetime.now():%Y%m%d_%H%M%S}.json"
     with open(backup, "w", encoding="utf-8") as f:
-        json.dump([{k: v for k, v in p.items() if not k.startswith("_")}
-                   for p in playlists + ([liked] if liked else [])],
-                  f, indent=1, ensure_ascii=False)
+        json.dump(
+            [
+                {k: v for k, v in p.items() if not k.startswith("_")}
+                for p in playlists + ([liked] if liked else [])
+            ],
+            f,
+            indent=1,
+            ensure_ascii=False,
+        )
     print(f"\nBackup of all scanned playlists saved to {backup}")
 
     plan = defaultdict(list)
@@ -527,8 +613,11 @@ def main():
     if liked:
         plan[LIKED_ID] = plan_liked(liked)
 
-    targets = [(pl, sorted(plan[pl["id"]], key=lambda r: r["pos"]))
-               for pl in playlists + ([liked] if liked else []) if plan.get(pl["id"])]
+    targets = [
+        (pl, sorted(plan[pl["id"]], key=lambda r: r["pos"]))
+        for pl in playlists + ([liked] if liked else [])
+        if plan.get(pl["id"])
+    ]
     total = sum(len(rs) for _, rs in targets)
     if not total:
         print("\nNo duplicates found.")
@@ -552,8 +641,10 @@ def main():
     apply_all = args.yes
     for pl, rs in targets:
         if not apply_all:
-            a = ask(f"\n'{pl['name']}': remove {len(rs)}? [y]es / [n]o / [a]ll remaining / [q]uit ",
-                    ["y", "n", "a", "q"])
+            a = ask(
+                f"\n'{pl['name']}': remove {len(rs)}? [y]es / [n]o / [a]ll remaining / [q]uit ",
+                ["y", "n", "a", "q"],
+            )
             if a == "q":
                 break
             if a == "n":
@@ -561,7 +652,7 @@ def main():
             if a == "a":
                 apply_all = True
         try:
-            removed_n, readded = apply_plan(sp, pl, rs)
+            removed_n, _ = apply_plan(sp, pl, rs)
             done += removed_n
             print(f"  ✓ {pl['name']}: removed {removed_n}")
         except RuntimeError as e:
