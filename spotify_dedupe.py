@@ -6,7 +6,8 @@ Nothing is changed until you confirm. Before any change, the full contents of
 every scanned playlist are saved to a JSON backup file.
 
 Modes
-  within  (default)  duplicates inside the same playlist; keeps the first copy
+  within  (default)  duplicates inside the same playlist; keeps the copy that
+                     was added earliest
   across             the same track in several playlists; keeps the copy that
                      was added earliest and removes it from the other playlists
   both               within first, then across
@@ -323,14 +324,20 @@ def cluster(tracks, fuzzy):
     return out
 
 
+def added_on(t):
+    return t["added_at"][:10] or "unknown date"
+
+
 def plan_within(playlist):
-    """Positions to remove inside one playlist: every copy except the first."""
+    """Positions to remove inside one playlist: every copy except the one
+    added earliest (ties, e.g. missing dates, go to the higher position)."""
     removals = []
     for g in cluster(playlist["tracks"], playlist["_fuzzy"]):
-        keep, *drop = sorted(g, key=lambda t: t["pos"])
+        keep, *drop = sorted(g, key=lambda t: (t["added_at"] or "9999", t["pos"]))
         for t in drop:
             removals.append({"pos": t["pos"], "track": t, "kept_pos": keep["pos"],
-                             "reason": f"duplicate of #{keep['pos'] + 1} in same playlist"})
+                             "reason": f"added {added_on(t)}; keeping #{keep['pos'] + 1} "
+                                       f"{fmt(keep)}, added {added_on(keep)}"})
     return removals
 
 
