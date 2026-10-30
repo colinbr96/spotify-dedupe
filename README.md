@@ -14,6 +14,7 @@ Nothing changes until you confirm, and every scanned playlist is backed up to a 
 ## Usage
 
 ```bash
+python spotify_dedupe.py --list                           # playlist names, for --only
 python spotify_dedupe.py --only "My Playlist" --dry-run   # preview one playlist
 python spotify_dedupe.py --only "My Playlist"             # remove after confirming
 python spotify_dedupe.py --mode across --fuzzy --dry-run  # same song across playlists

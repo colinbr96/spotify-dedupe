@@ -31,6 +31,7 @@ Setup (one time)
      python spotify_dedupe.py --mode across   # across playlists
      python spotify_dedupe.py --fuzzy --dry-run
      python spotify_dedupe.py --liked-only --dry-run
+     python spotify_dedupe.py --list          # playlist names, for --only
 
 Notes
   - Only playlists you own or collaborate on can be read/changed (Spotify rule).
@@ -429,6 +430,21 @@ def ask(prompt, choices):
         print("  please answer one of: " + "/".join(choices))
 
 
+def is_mine(p, me):
+    return (p.get("owner") or {}).get("id") == me["id"] or p.get("collaborative")
+
+
+def list_playlists(sp, me):
+    """Print every playlist in the library; only those marked 'mine' can be scanned."""
+    rows = [p for p in sp.my_playlists() if p]
+    print(f"{len(rows)} playlists:")
+    for p in rows:
+        owner = p.get("owner") or {}
+        total = (p.get("items") or p.get("tracks") or {}).get("total", "?")  # 'tracks' = pre-2026 name
+        print(f"  {'mine ' if is_mine(p, me) else 'other'} {total:>5}  {p.get('name') or ''}"
+              f"  [{owner.get('display_name') or owner.get('id') or '?'}]")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Find and remove duplicate tracks in your Spotify playlists.")
     ap.add_argument("--mode", choices=["within", "across", "both"], default="within")
@@ -437,6 +453,7 @@ def main():
     ap.add_argument("--liked", action="store_true",
                     help="also check Liked Songs for the same song liked from different releases")
     ap.add_argument("--liked-only", action="store_true", help="check only Liked Songs")
+    ap.add_argument("--list", action="store_true", help="list your playlists (exact names for --only) and exit")
     ap.add_argument("--dry-run", action="store_true", help="only report, never change anything")
     ap.add_argument("--yes", action="store_true", help="skip per-playlist prompts (still asks once)")
     ap.add_argument("--only", nargs="*", default=[], help="only scan playlists with exactly one of these names (case-insensitive)")
@@ -456,13 +473,16 @@ def main():
     me = sp.me()
     print(f"Logged in as {me.get('display_name') or me['id']}")
 
+    if args.list:
+        list_playlists(sp, me)
+        return
+
     playlists = []
     for p in ([] if args.liked_only else sp.my_playlists()):
         if not p:
             continue
         name = p.get("name") or ""
-        mine = (p.get("owner") or {}).get("id") == me["id"] or p.get("collaborative")
-        if not mine:
+        if not is_mine(p, me):
             continue
         low = name.lower()
         if args.only and not any(o.strip().lower() == low.strip() for o in args.only):
