@@ -429,6 +429,11 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=[], help="skip playlists whose name contains any of these")
     args = ap.parse_args()
 
+    # Track names can hold any character; don't crash on consoles/pipes that use cp1252.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     client_id = os.environ.get("SPOTIFY_CLIENT_ID")
     if not client_id:
         sys.exit("Set SPOTIFY_CLIENT_ID first (see the setup notes at the top of this file).")
@@ -470,7 +475,7 @@ def main():
         print(f"  Liked Songs: {len(liked['tracks'])} items")
 
     backup = f"spotify_backup_{datetime.now():%Y%m%d_%H%M%S}.json"
-    with open(backup, "w") as f:
+    with open(backup, "w", encoding="utf-8") as f:
         json.dump([{k: v for k, v in p.items() if not k.startswith("_")}
                    for p in playlists + ([liked] if liked else [])],
                   f, indent=1, ensure_ascii=False)
