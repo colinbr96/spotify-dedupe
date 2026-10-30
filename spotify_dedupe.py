@@ -72,6 +72,7 @@ SCOPES = ("playlist-read-private playlist-read-collaborative "
 LIKED_ID = "__liked_songs__"
 TOKEN_CACHE = os.path.expanduser("~/.spotify_dedupe_token.json")
 FUZZY_DURATION_MS = 3000
+UNAVAILABLE = "(unavailable)"
 
 
 # --------------------------------------------------------------------------
@@ -240,7 +241,7 @@ class Spotify:
             out.append({
                 "pos": pos,
                 "uri": (item or {}).get("uri"),
-                "name": (item or {}).get("name") or "(unavailable)",
+                "name": (item or {}).get("name") or UNAVAILABLE,
                 "artists": [a.get("name", "") for a in (item or {}).get("artists") or []]
                            or [((item or {}).get("show") or {}).get("name", "")],
                 "duration_ms": (item or {}).get("duration_ms") or 0,
@@ -301,7 +302,7 @@ def cluster(tracks, fuzzy):
     for uri, g in by_uri.items():
         t = g[0]
         key = (_norm(t["name"]), _norm(t["artists"][0] if t["artists"] else ""))
-        if key[0]:
+        if key[0] and t["name"] != UNAVAILABLE:  # no metadata to compare, so only the URI counts
             buckets[key].append(uri)
         else:
             buckets[("uri", uri)].append(uri)
