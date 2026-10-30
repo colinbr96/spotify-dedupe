@@ -425,7 +425,7 @@ def main():
     ap.add_argument("--liked-only", action="store_true", help="check only Liked Songs")
     ap.add_argument("--dry-run", action="store_true", help="only report, never change anything")
     ap.add_argument("--yes", action="store_true", help="skip per-playlist prompts (still asks once)")
-    ap.add_argument("--only", nargs="*", default=[], help="only scan playlists whose name contains any of these")
+    ap.add_argument("--only", nargs="*", default=[], help="only scan playlists with exactly one of these names (case-insensitive)")
     ap.add_argument("--exclude", nargs="*", default=[], help="skip playlists whose name contains any of these")
     args = ap.parse_args()
 
@@ -446,7 +446,7 @@ def main():
         if not mine:
             continue
         low = name.lower()
-        if args.only and not any(o.lower() in low for o in args.only):
+        if args.only and not any(o.strip().lower() == low.strip() for o in args.only):
             continue
         if any(x.lower() in low for x in args.exclude):
             continue
