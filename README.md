@@ -30,3 +30,7 @@ uv run ruff format      # format
 uv run ruff check       # lint
 uv run ty check         # typecheck
 ```
+
+## License
+
+[MIT](LICENSE)

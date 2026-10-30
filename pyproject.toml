@@ -3,6 +3,7 @@ name = "spotify-dedupe"
 version = "0.1.0"
 description = "Find and remove duplicate tracks in your Spotify playlists."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31",
